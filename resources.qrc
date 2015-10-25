@@ -1,0 +1,31 @@
+<RCC>
+    <qresource prefix="/">
+        <file>resources/icons/RA_hover.png</file>
+        <file>resources/icons/RA_normal.png</file>
+        <file>resources/icons/RF_hover.png</file>
+        <file>resources/icons/RF_normal.png</file>
+        <file>resources/icons/RC_hover.png</file>
+        <file>resources/icons/RC_normal.png</file>
+        <file>resources/icons/srv_banned.png</file>
+        <file>resources/icons/srv_flood.png</file>
+        <file>resources/icons/srv_na.png</file>
+        <file>resources/icons/srv_ref1.png</file>
+        <file>resources/icons/srv_ref2.png</file>
+        <file>resources/icons/srv_ref3.png</file>
+        <file>resources/icons/srv_ref4.png</file>
+        <file>resources/icons/srv_ref5.png</file>
+        <file>resources/icons/srv_ref6.png</file>
+        <file>resources/icons/srv_ref7.png</file>
+        <file>resources/icons/srv_ref8.png</file>
+        <file>resources/icons/srv_bad.png</file>
+        <file>resources/icons/srv_good.png</file>
+        <file>resources/icons/srv_uttershit.png</file>
+        <file>resources/icons/pl_bot.png</file>
+        <file>resources/icons/pl_free.png</file>
+        <file>resources/icons/pl_normal.png</file>
+        <file>resources/icons/pl_spect.png</file>
+        <file>resources/icons/pl_empty.png</file>
+        <file>resources/icons/filter_hover.png</file>
+        <file>resources/icons/filter_normal.png</file>
+    </qresource>
+</RCC>
