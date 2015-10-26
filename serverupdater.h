@@ -5,16 +5,18 @@
 #include <QtNetwork/QUdpSocket>
 #include <QTimer>
 #include <QThread>
+#include <QMutex>
 #include "serverlist.h"
 
 class ServerUpdaterSenderThread : public QThread
 {
 public:
-    ServerUpdaterSenderThread(QObject* object, QUdpSocket& socket, QVector<Server> servers, quint32 timeout);//np with duplicating the list here
+    ServerUpdaterSenderThread(QObject* object, QUdpSocket& socket, QMutex& mutex, QVector<Server> servers, quint32 timeout);//np with duplicating the list here
     virtual void run();
 
 private:
     QUdpSocket& Socket;
+    QMutex& SocketMutex;
     QVector<Server> Servers;
     quint32 Timeout;
 };
@@ -49,7 +51,7 @@ public:
     void scheduleUpdateVisible();
     void abortUpdates();
 
-    bool isActive() { return (State == State_Inactive); }
+    bool isActive() { return (State != State_Inactive); }
 
     enum
     {
@@ -76,6 +78,7 @@ private:
 
     quint32 Timeout;
     QUdpSocket Socket;
+    QMutex SocketMutex;
     QVector<ServerUpdaterAction> Actions;
     QTimer Timer;
     ServerList* Servers;

@@ -62,17 +62,26 @@ bool ServerUpdater::scheduleUpdateServer(QString serverAddress)
 {
     QStringList qslP = serverAddress.split(":");
     if (qslP.size() > 2)
+    {
+        //qDebug("sqlP.size() = %d", qslP.size());
         return false;
+    }
     int port = 10666;
     bool port_ok = true;
     if (qslP.size() == 2)
         port = qslP[1].toInt(&port_ok);
     if (!port_ok || (port < 0) || (port > 65535))
+    {
+        //qDebug("port_ok = %d; port = %d", port_ok, port);
         return false;
+    }
     QHostInfo hi = QHostInfo::fromName(qslP[0]);
     QList<QHostAddress> hia = hi.addresses();
     if (hia.isEmpty())
+    {
+        //qDebug("hia.isEmpty() = true");
         return false;
+    }
     quint32 host = 0;
     for (int i = 0; i < hia.size(); i++)
     {
@@ -82,7 +91,11 @@ bool ServerUpdater::scheduleUpdateServer(QString serverAddress)
             break;
         }
     }
-    if (!host) return false;
+    if (!host)
+    {
+        //qDebug("no host for %s", qslP[0].toUtf8().data());
+        return false;
+    }
 
     scheduleUpdateServer(host, port);
     return true;
@@ -155,6 +168,23 @@ void ServerUpdater::abortUpdates()
     emit failed(Failed_Timeout);
 }
 
+static void fixUpSocket(QUdpSocket& Socket)
+{
+    Socket.setReadBufferSize(256*1024);
+#ifdef WIN32
+    // Basically, Windows doesn't handle receiving 600+ UDP packets at the same second properly.
+    // For it to not drop servers randomly, the recv buffer needs to be enlarged.
+    // AFAIK this isn't a problem on Linux.
+    static bool WSAFail = false;
+    int v = 256*1024;
+    if (!WSAFail && (::setsockopt(Socket.socketDescriptor(), SOL_SOCKET, SO_RCVBUF, (char*)&v, sizeof(v)) < 0))
+    {
+        qDebug("ServerUpdater: Win32: Failed to increase the buffer limit; WSAGetLastError() = %d", WSAGetLastError());
+        WSAFail = true;
+    }
+#endif
+}
+
 void ServerUpdater::timerTick()
 {
     if (!Servers)
@@ -195,12 +225,15 @@ void ServerUpdater::timerTick()
         qDebug("ServerUpdater: Timed out.");
     }
 
+    if (Actions.size())
+        qDebug("state = %d, actions = %d", State, Actions.size());
     if (State == State_Inactive)
     {
         if (Actions.size())
         {
             ServerUpdaterAction ac = Actions[0];
             Actions.removeFirst();
+            qDebug("executing action %d", ac.Action);
             if (ac.Action == ServerUpdaterAction::SU_UpdateAll)
             {
                 MasterIP = ac.IP;
@@ -222,6 +255,7 @@ void ServerUpdater::timerTick()
                     State = State_Inactive;
                     return;
                 }
+                fixUpSocket(Socket);
 
                 qDebug("Started master update from %s:%d.", QHostAddress(MasterIP).toString().toUtf8().data(), MasterPort);
                 Socket.writeDatagram(p, QHostAddress(MasterIP), MasterPort);
@@ -261,8 +295,9 @@ void ServerUpdater::timerTick()
                         State = State_Inactive;
                         return;
                     }
+                    fixUpSocket(Socket);
 
-                    ServerUpdaterSenderThread* senderThread = new ServerUpdaterSenderThread(this, Socket, serversFake, Timeout);
+                    ServerUpdaterSenderThread* senderThread = new ServerUpdaterSenderThread(this, Socket, SocketMutex, serversFake, Timeout);
                     connect(senderThread, SIGNAL(finished()), senderThread, SLOT(deleteLater()));
                     senderThread->start();
                     int delaybetween = std::max(2u, Timeout/1000);
@@ -299,6 +334,7 @@ void ServerUpdater::timerTick()
                     State = State_Inactive;
                     return;
                 }
+                fixUpSocket(Socket);
 
                 QVector<Server>& servers = Servers->getServers();
                 for (int i = 0; i < servers.size(); i++)
@@ -312,7 +348,7 @@ void ServerUpdater::timerTick()
                     }
                 }
 
-                ServerUpdaterSenderThread* senderThread = new ServerUpdaterSenderThread(this, Socket, serversFake, Timeout);
+                ServerUpdaterSenderThread* senderThread = new ServerUpdaterSenderThread(this, Socket, SocketMutex, serversFake, Timeout);
                 connect(senderThread, SIGNAL(finished()), senderThread, SLOT(deleteLater()));
                 senderThread->start();
                 TimeoutTime = QDateTime::currentMSecsSinceEpoch()+Timeout;
@@ -328,11 +364,11 @@ void ServerUpdater::timerTick()
             DatagramTime = QDateTime::currentMSecsSinceEpoch();
     }
 
+    socketReady();
+
     if (!DatagramBuffer.isEmpty() && ((QDateTime::currentMSecsSinceEpoch()-DatagramTime > Timeout/8) || (State != State_WaitingServers)))
     {
         DatagramTime = QDateTime::currentMSecsSinceEpoch();
-
-        qDebug("%d datagrams", DatagramBuffer.size());
 
         for (int i = 0; i < DatagramBuffer.size(); i++)
         {
@@ -342,6 +378,8 @@ void ServerUpdater::timerTick()
             ds.setByteOrder(QDataStream::LittleEndian);
             parseDatagram(ds, DatagramBuffer[i].Host, DatagramBuffer[i].Port, DatagramBuffer[i].ReceivedTime);
         }
+
+        qDebug("read %d datagrams", DatagramBuffer.size());
 
         DatagramBuffer.clear();
 
@@ -361,20 +399,9 @@ void ServerUpdater::timerTick()
 
 void ServerUpdater::socketReady()
 {
-#ifdef WIN32
-    // Basically, Windows doesn't handle receiving 600+ UDP packets at the same second properly.
-    // For it to not drop servers randomly, the recv buffer needs to be enlarged.
-    // AFAIK this isn't a problem on Linux.
-    static bool WSAFail = false;
-    int v = -1;
-    if (!WSAFail && (::setsockopt(Socket.socketDescriptor(), SOL_SOCKET, SO_RCVBUF, (char*)&v, sizeof(v)) < 0))
-    {
-        qDebug("ServerUpdater: Win32: Failed to increase the buffer limit; WSAGetLastError() = %d", WSAGetLastError());
-        WSAFail = true;
-    }
-#endif
-
-    while (Socket.hasPendingDatagrams())
+    SocketMutex.lock();
+    int db = 0;
+    while ((Socket.state() == QAbstractSocket::BoundState) && Socket.hasPendingDatagrams())
     {
         char pData[40960];
         QHostAddress pHost;
@@ -387,17 +414,18 @@ void ServerUpdater::socketReady()
         rd.Host = pHost;
         rd.Port = pPort;
         DatagramBuffer.append(rd);
+        db++;
     }
+    SocketMutex.unlock();
 }
 
-ServerUpdaterSenderThread::ServerUpdaterSenderThread(QObject* object, QUdpSocket &socket, QVector<Server> servers, quint32 timeout) :
-    QThread(object), Socket(socket), Servers(servers), Timeout(timeout)
+ServerUpdaterSenderThread::ServerUpdaterSenderThread(QObject* object, QUdpSocket &socket, QMutex& mutex, QVector<Server> servers, quint32 timeout) :
+    QThread(object), Socket(socket), SocketMutex(mutex), Servers(servers), Timeout(timeout)
 {
     // hi
 }
 
-// we are doing this in a separate thread, because the SENDING is laggy (laggy enough to introduce a +1 second delay to servers' ping)
-void ServerUpdaterSenderThread::run()
+static void requestServerUpdate(QUdpSocket& Socket, QMutex& SocketMutex, class Server& Server, quint32 Timeout)
 {
     if (Socket.state() != QAbstractSocket::BoundState)
         return;
@@ -413,29 +441,40 @@ void ServerUpdaterSenderThread::run()
     }
 #endif
 
+    QThread::msleep(std::max(2u, Timeout/1000));
+
+    QByteArray p;
+    QDataStream ds(&p, QIODevice::WriteOnly);
+    ds.setByteOrder(QDataStream::LittleEndian);
+    ds << quint32(199);
+    ds << quint32(SQF_NAME|
+                  SQF_MAPNAME|
+                  SQF_GAMETYPE|
+                  SQF_IWAD|
+                  SQF_ALL_DMFLAGS|
+                  SQF_FORCEPASSWORD|SQF_FORCEJOINPASSWORD|
+                  SQF_PLAYERDATA|SQF_NUMPLAYERS|SQF_MAXCLIENTS|SQF_MAXPLAYERS);
+    ds << quint32(QDateTime::currentMSecsSinceEpoch());
+    EncodePacket(p);
+
+    // try to wait for when we actually CAN WRITE SOMETHING.
+    // waitForBytesWritten will NOT work because we are using the socket from another thread.
+    // will wait at least 1ms
+    SocketMutex.lock();
+    Socket.writeDatagram(p, QHostAddress(Server.IP), Server.Port);
+    SocketMutex.unlock();
+}
+
+// we are doing this in a separate thread, because the SENDING is laggy (laggy enough to introduce a +1 second delay to servers' ping)
+void ServerUpdaterSenderThread::run()
+{
+    int dw = 0;
     for (int i = 0; i < Servers.size(); i++)
     {
-        QThread::msleep(std::max(2u, Timeout/1000));
-
-        QByteArray p;
-        QDataStream ds(&p, QIODevice::WriteOnly);
-        ds.setByteOrder(QDataStream::LittleEndian);
-        ds << quint32(199);
-        ds << quint32(SQF_NAME|
-                      SQF_MAPNAME|
-                      SQF_GAMETYPE|
-                      SQF_IWAD|
-                      SQF_ALL_DMFLAGS|
-                      SQF_FORCEPASSWORD|SQF_FORCEJOINPASSWORD|
-                      SQF_PLAYERDATA|SQF_NUMPLAYERS|SQF_MAXCLIENTS|SQF_MAXPLAYERS);
-        ds << quint32(QDateTime::currentMSecsSinceEpoch());
-        EncodePacket(p);
-
-        // try to wait for when we actually CAN WRITE SOMETHING.
-        // waitForBytesWritten will NOT work because we are using the socket from another thread.
-        // will wait at least 1ms
-        Socket.writeDatagram(p, QHostAddress(Servers[i].IP), Servers[i].Port);
+        requestServerUpdate(Socket, SocketMutex, Servers[i], Timeout);
+        dw++;
     }
+    qDebug("wrote %d datagrams", dw);
 }
 
 static QString GetStringFromStream(QDataStream& ds)
@@ -617,7 +656,7 @@ void ServerUpdater::parseDatagram(QDataStream& ds, QHostAddress host, quint16 po
                 MasterPort = 0;
                 emit masterSucceeded();
                 qDebug("ServerUpdater: Update finished, proceeding with individual server updates...");
-                ServerUpdaterSenderThread* senderThread = new ServerUpdaterSenderThread(this, Socket, Servers->getServers(), Timeout);
+                ServerUpdaterSenderThread* senderThread = new ServerUpdaterSenderThread(this, Socket, SocketMutex, Servers->getServers(), Timeout);
                 connect(senderThread, SIGNAL(finished()), senderThread, SLOT(deleteLater()));
                 senderThread->start();
                 ExpectingServers = Servers->getServers().size();
@@ -903,30 +942,41 @@ void ServerUpdater::parseDatagram(QDataStream& ds, QHostAddress host, quint16 po
 #include "huffman.h"
 static bool hhuff = false;
 
+#include <QMutex>
+QMutex HuffmanMutex;
+
 void DecodePacket(QByteArray& array)
 {
+    HuffmanMutex.lock();
     if (!hhuff)
     {
         HUFFMAN_Construct();
         hhuff = true;
     }
+    HuffmanMutex.unlock();
 
     unsigned char out[40960];
     int outlen;
+    HuffmanMutex.lock();
     HUFFMAN_Decode((unsigned char*)array.data(), out, array.size(), &outlen);
+    HuffmanMutex.unlock();
     array.setRawData((char*)out, outlen);
 }
 
 void EncodePacket(QByteArray& array)
 {
+    HuffmanMutex.lock();
     if (!hhuff)
     {
         HUFFMAN_Construct();
         hhuff = true;
     }
+    HuffmanMutex.unlock();
 
     unsigned char out[40960];
     int outlen;
+    HuffmanMutex.lock();
     HUFFMAN_Encode((unsigned char*)array.data(), out, array.size(), &outlen);
+    HuffmanMutex.unlock();
     array.setRawData((char*)out, outlen);
 }

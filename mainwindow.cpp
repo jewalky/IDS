@@ -94,6 +94,18 @@ void MainWindow::sFiltersOkay()
     if (!list) return;
     ui->serverList->setFilterList(list->getFilterList());
     list->deleteLater();
+    // also save filters
+    const QVector<ServerFilter>& v = list->getFilterList();
+    QVariantList vl;
+    for (int i = 0; i < v.size(); i++)
+    {
+        const ServerFilter& vf = v[i];
+        QMap<QString, QVariant> vlf = vf.asMap();
+        vl.append(QVariant(vlf));
+    }
+
+    Settings::get()->setValue("filters.configured", true);
+    Settings::get()->setValue("filters.list", vl);
 }
 
 void MainWindow::sUpdateSucceeded()

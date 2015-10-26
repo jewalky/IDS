@@ -7,6 +7,7 @@
 #include <QMutex>
 #include <QTimer>
 #include <QPixmap>
+#include <QVariant>
 
 enum
 {
@@ -71,6 +72,38 @@ struct ServerFilterPart
     quint32 ZADMFlags;
     quint32 CompatFlags;
     quint32 ZACompatFlags;
+
+    QMap<QString, QVariant> asMap() const
+    {
+        QMap<QString, QVariant> map;
+        map["flags"] = Flags;
+        map["game_modes"] = GameModes;
+        map["server_name"] = ServerName;
+        map["server_ip"] = ServerIP;
+        map["iwad"] = IWAD;
+        map["pwads"] = PWADs;
+        map["dmflags"] = DMFlags;
+        map["dmflags2"] = DMFlags2;
+        map["zadmflags"] = ZADMFlags;
+        map["compatflags"] = CompatFlags;
+        map["zacompatflags"] = ZACompatFlags;
+        return map;
+    }
+
+    void fromMap(QMap<QString, QVariant> map)
+    {
+        Flags = map["flags"].toUInt();
+        GameModes = map["game_modes"].toUInt();
+        ServerName = map["server_name"].toString();
+        ServerIP = map["server_ip"].toString();
+        IWAD = map["iwad"].toString();
+        PWADs = map["pwads"].toStringList();
+        DMFlags = map["dmflags"].toUInt();
+        DMFlags2 = map["dmflags2"].toUInt();
+        ZADMFlags = map["zadmflags"].toUInt();
+        CompatFlags = map["compatflags"].toUInt();
+        ZACompatFlags = map["zacompatflags"].toUInt();
+    }
 
     bool checkServer(Server& server) const;
 
@@ -153,6 +186,26 @@ public:
     void setEnabled(bool enabled)
     {
         setFlag(Flag_Enabled, enabled);
+    }
+
+    QMap<QString, QVariant> asMap() const
+    {
+        QMap<QString, QVariant> map;
+        map["flags"] = Flags;
+        map["filter"] = Filter.asMap();
+        map["exceptions"] = Exceptions.asMap();
+        map["name"] = Name;
+        map["enabled"] = Enabled;
+        return map;
+    }
+
+    void fromMap(QMap<QString, QVariant> map)
+    {
+        Flags = map["flags"].toUInt();
+        Filter.fromMap(map["filter"].value< QMap<QString, QVariant> >());
+        Exceptions.fromMap(map["exceptions"].value< QMap<QString, QVariant> >());
+        Name = map["name"].toString();
+        Enabled = map["enabled"].toBool();
     }
 
 private:

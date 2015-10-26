@@ -76,46 +76,63 @@ ServerList::ServerList(QWidget* parent) :
 
     ServerCatCount = 0;
 
-    // the default filter list
-    QVector<ServerFilter> filters;
+    if (!Settings::get()->value("filters.configured").toBool())
+    {
+        // the default filter list
+        QVector<ServerFilter> filters;
 
-    ServerFilter filterGlobal;
-    filterGlobal.setName("Default global filter");
-    filterGlobal.setFlag(ServerFilter::Flag_Enabled, true);
-    filters.append(filterGlobal);
+        ServerFilter filterGlobal;
+        filterGlobal.setName("Default global filter");
+        filterGlobal.setFlag(ServerFilter::Flag_Enabled, true);
+        filters.append(filterGlobal);
 
-    ServerFilter filterActive;
-    filterActive.setName("Active");
-    ServerFilterPart filterActiveNegative;
-    filterActiveNegative.Flags |= ServerFilterPart::Flag_NA;
-    filterActiveNegative.Flags |= ServerFilterPart::Flag_Empty;
-    filterActive.setExceptions(filterActiveNegative);
-    filterActive.setFlag(ServerFilter::Flag_Enabled|ServerFilter::Flag_HasExceptions, true);
-    filters.append(filterActive);
+        ServerFilter filterActive;
+        filterActive.setName("Active");
+        ServerFilterPart filterActiveNegative;
+        filterActiveNegative.Flags |= ServerFilterPart::Flag_NA;
+        filterActiveNegative.Flags |= ServerFilterPart::Flag_Empty;
+        filterActive.setExceptions(filterActiveNegative);
+        filterActive.setFlag(ServerFilter::Flag_Enabled|ServerFilter::Flag_HasExceptions, true);
+        filters.append(filterActive);
 
-    ServerFilter filterInactive;
-    filterInactive.setName("Inactive");
-    ServerFilterPart filterInactivePositive;
-    filterInactivePositive.Flags |= ServerFilterPart::Flag_Empty;
-    ServerFilterPart filterInactiveNegative;
-    filterInactiveNegative.Flags |= ServerFilterPart::Flag_NA;
-    filterInactive.setFilter(filterInactivePositive);
-    filterInactive.setExceptions(filterInactiveNegative);
-    filterInactive.setFlag(ServerFilter::Flag_Enabled|ServerFilter::Flag_HasFilter|ServerFilter::Flag_HasExceptions, true);
-    filters.append(filterInactive);
+        ServerFilter filterInactive;
+        filterInactive.setName("Inactive");
+        ServerFilterPart filterInactivePositive;
+        filterInactivePositive.Flags |= ServerFilterPart::Flag_Empty;
+        ServerFilterPart filterInactiveNegative;
+        filterInactiveNegative.Flags |= ServerFilterPart::Flag_NA;
+        filterInactive.setFilter(filterInactivePositive);
+        filterInactive.setExceptions(filterInactiveNegative);
+        filterInactive.setFlag(ServerFilter::Flag_Enabled|ServerFilter::Flag_HasFilter|ServerFilter::Flag_HasExceptions, true);
+        filters.append(filterInactive);
 
-    ServerFilter filterInvalid;
-    filterInvalid.setName("Invalid");
-    ServerFilterPart filterInvalidPositive;
-    filterInvalidPositive.Flags |= ServerFilterPart::Flag_NA;
-    ServerFilterPart filterInvalidNegative;
-    filterInvalidNegative.Flags |= ServerFilterPart::Flag_NotNA;
-    filterInvalid.setFilter(filterInvalidPositive);
-    filterInvalid.setExceptions(filterInvalidNegative);
-    filterInvalid.setFlag(ServerFilter::Flag_Enabled|ServerFilter::Flag_HasFilter|ServerFilter::Flag_HasExceptions, true);
-    filters.append(filterInvalid);
+        ServerFilter filterInvalid;
+        filterInvalid.setName("Invalid");
+        ServerFilterPart filterInvalidPositive;
+        filterInvalidPositive.Flags |= ServerFilterPart::Flag_NA;
+        ServerFilterPart filterInvalidNegative;
+        filterInvalidNegative.Flags |= ServerFilterPart::Flag_NotNA;
+        filterInvalid.setFilter(filterInvalidPositive);
+        filterInvalid.setExceptions(filterInvalidNegative);
+        filterInvalid.setFlag(ServerFilter::Flag_Enabled|ServerFilter::Flag_HasFilter|ServerFilter::Flag_HasExceptions, true);
+        filters.append(filterInvalid);
 
-    setFilterList(filters);
+        setFilterList(filters);
+    }
+    else
+    {
+        // restore filter list from whatever there was before
+        QVector<ServerFilter> filters;
+        QVariantList vlf = Settings::get()->value("filters.list").value< QVariantList >();
+        for (int i = 0; i < vlf.size(); i++)
+        {
+            ServerFilter f;
+            f.fromMap(vlf[i].value< QMap<QString, QVariant> >());
+            filters.append(f);
+        }
+
+        setFilterList(filters);
+    }
 }
 
 void ServerList::setScrollData(QScrollArea *area, QWidget *viewport)
