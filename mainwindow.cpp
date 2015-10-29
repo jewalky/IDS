@@ -9,6 +9,7 @@
 
 #include "settings.h"
 #include "filterlist.h"
+#include "playerspopup.h"
 
 float MainWindow::DPIScale = 1.0;
 
@@ -63,13 +64,22 @@ MainWindow::~MainWindow()
 
 void MainWindow::on_servers_update_clicked()
 {
-    if (!svupdater->scheduleUpdateAll("master.zandronum.com:15300"))
-        qDebug("Failed to schedule update with the default master address.");
+    if (Settings::get()->value("refreshing.useMaster").toBool())
+    {
+        QString master = Settings::get()->value("refreshing.masterAddress", "master.zandronum.com:15300").toString();
+        if (!svupdater->scheduleUpdateAll(master))
+            qDebug("Failed to schedule update master address %s.", master.toUtf8().data());
+    }
+    else
+    {
+        // just refresh everything
+        svupdater->scheduleUpdateVisible(true);
+    }
 }
 
 void MainWindow::on_servers_updateShown_clicked()
 {
-    svupdater->scheduleUpdateVisible();
+    svupdater->scheduleUpdateVisible(false);
 }
 
 void MainWindow::on_servers_updateCurrent_clicked()
@@ -94,18 +104,7 @@ void MainWindow::sFiltersOkay()
     if (!list) return;
     ui->serverList->setFilterList(list->getFilterList());
     list->deleteLater();
-    // also save filters
-    const QVector<ServerFilter>& v = list->getFilterList();
-    QVariantList vl;
-    for (int i = 0; i < v.size(); i++)
-    {
-        const ServerFilter& vf = v[i];
-        QMap<QString, QVariant> vlf = vf.asMap();
-        vl.append(QVariant(vlf));
-    }
-
-    Settings::get()->setValue("filters.configured", true);
-    Settings::get()->setValue("filters.list", vl);
+    ui->serverList->saveFilterList();
 }
 
 void MainWindow::sUpdateSucceeded()
@@ -119,8 +118,8 @@ void MainWindow::sUpdateSucceeded()
     QVector<ServerFilter> filters = ui->serverList->getFilterList();
     for (int i = 1; i < filters.size(); i++)
     {
-        if (!filters[i].isEnabled())
-            break;
+        //if (!filters[i].isEnabled())
+        //    break;
         ssFL += ", ";
         ssFL += QString("%1: %2").arg(filters[i].getName(), QString::number(ui->serverList->getServerCount(i)));
     }
@@ -170,6 +169,11 @@ void MainWindow::initOptionsTab()
 {
     QSettings* s = Settings::get();
 
+    ui->optionsTree->setCurrentRow(0);
+
+    //////////
+    /// APPEARANCE TAB
+
     ui->optionsAppearance_pingBad->setValue(s->value("appearance.pingAcceptable", 200).toInt());
     ui->optionsAppearance_pingGood->setValue(s->value("appearance.pingGood", 100).toInt());
 
@@ -182,7 +186,6 @@ void MainWindow::initOptionsTab()
     ui->optionsAppearance_animateRefresh->setChecked(s->value("appearance.animateRefresh", false).toBool());
     ui->serverList->setFlag(ServerList::Flag_AnimateRefresh, ui->optionsAppearance_animateRefresh->isChecked());
 
-
     ui->optionsAppearance_playersTop->setChecked(s->value("appearance.cvPlayersTop", true).toBool());
     ui->serverList->setFlag(ServerList::Flag_CVPlayersTop, ui->optionsAppearance_playersTop->isChecked());
     ui->optionsAppearance_playersSorting->setChecked(s->value("appearance.cvPlayersSorting", false).toBool());
@@ -191,6 +194,15 @@ void MainWindow::initOptionsTab()
     ui->serverList->setFlag(ServerList::Flag_CVNoGrid, ui->optionsAppearance_noGrid->isChecked());
     ui->optionsAppearance_fullGrid->setChecked(s->value("appearance.cvFullGrid", true).toBool());
     ui->serverList->setFlag(ServerList::Flag_CVGrid, ui->optionsAppearance_fullGrid->isChecked());
+
+    ////////////
+    /// REFRESHING TAB
+
+    ui->optionsRefreshing_useMaster->setChecked(s->value("refreshing.useMaster", true).toBool());
+    ui->optionsRefreshing_masterAddress->setText(s->value("refreshing.masterAddress", "master.zandronum.com:15300").toString());
+    ui->optionsRefreshing_timeout->setValue(s->value("refreshing.timeout", 5000).toInt());
+    svupdater->setTimeout(ui->optionsRefreshing_timeout->value());
+    ui->optionsRefreshing_keepOldData->setChecked(s->value("refreshing.keepOldData", false).toBool());
 }
 
 
@@ -261,3 +273,34 @@ void MainWindow::on_optionsAppearance_smoothPing_toggled(bool checked)
     ui->serverList->setFlag(ServerList::Flag_SmoothPing, checked);
 }
 
+void MainWindow::on_optionsRefreshing_useMaster_toggled(bool checked)
+{
+    Settings::get()->setValue("refreshing.useMaster", checked);
+    ui->optionsRefreshing_masterAddress->setEnabled(checked);
+}
+
+void MainWindow::on_optionsRefreshing_masterAddress_textEdited(const QString &arg1)
+{
+    Settings::get()->setValue("refreshing.masterAddress", arg1);
+}
+
+void MainWindow::on_optionsTree_currentItemChanged(QListWidgetItem *current, QListWidgetItem *previous)
+{
+    ui->optionsPages->setCurrentIndex(ui->optionsTree->row(current));
+}
+
+void MainWindow::on_optionsRefreshing_timeout_valueChanged(int arg1)
+{
+    Settings::get()->setValue("refreshing.timeout", arg1);
+    svupdater->setTimeout(arg1);
+}
+
+void MainWindow::on_optionsRefreshing_keepOldData_toggled(bool checked)
+{
+    Settings::get()->setValue("refreshing.keepOldData", checked);
+}
+
+void MainWindow::closeEvent(QCloseEvent *ev)
+{
+    PlayersPopup::freeStatic();
+}

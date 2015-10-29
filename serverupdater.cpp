@@ -2,6 +2,7 @@
 #include <QtNetwork/QHostInfo>
 #include <QDataStream>
 #include <QDateTime>
+#include "settings.h"
 
 #ifdef WIN32
 #include <winsock2.h>
@@ -119,12 +120,12 @@ void ServerUpdater::scheduleUpdateServer(quint32 ip, quint16 port)
     Actions.append(ac);
 }
 
-void ServerUpdater::scheduleUpdateVisible()
+void ServerUpdater::scheduleUpdateVisible(bool all)
 {
     ServerUpdaterAction ac;
     ac.Action = ServerUpdaterAction::SU_UpdateVisible;
     ac.IP = 0;
-    ac.Port = 0;
+    ac.Port = all?1:0;
     Actions.append(ac);
 }
 
@@ -272,11 +273,13 @@ void ServerUpdater::timerTick()
                 MasterPort = 0;
                 State = State_WaitingServers;
                 OldServers = Servers->getServers();
+                if (!Settings::get()->value("refreshing.keepOldData", true).toBool())
+                    OldServers.clear();
                 QVector<Server>& servers = Servers->getServers();
                 QVector<Server> serversFake;
                 for (int i = 0; i < servers.size(); i++)
                 {
-                    if (servers[i].Visible)
+                    if (servers[i].Visible || ac.Port == 1)
                     {
                         serversFake.append(servers[i]);
                         servers[i].LastState = Server::State_Refreshing;
@@ -318,6 +321,8 @@ void ServerUpdater::timerTick()
                 MasterPort = 0;
                 State = State_WaitingServers;
                 OldServers = Servers->getServers();
+                if (!Settings::get()->value("refreshing.keepOldData", true).toBool())
+                    OldServers.clear();
                 // connect to the server here
                 QVector<Server> serversFake;
                 Server serverFake;
@@ -451,9 +456,12 @@ static void requestServerUpdate(QUdpSocket& Socket, QMutex& SocketMutex, class S
                   SQF_MAPNAME|
                   SQF_GAMETYPE|
                   SQF_IWAD|
+                  SQF_PWADS|
                   SQF_ALL_DMFLAGS|
                   SQF_FORCEPASSWORD|SQF_FORCEJOINPASSWORD|
-                  SQF_PLAYERDATA|SQF_NUMPLAYERS|SQF_MAXCLIENTS|SQF_MAXPLAYERS);
+                  SQF_LIMITS|
+                  SQF_PLAYERDATA|SQF_NUMPLAYERS|SQF_MAXCLIENTS|SQF_MAXPLAYERS|
+                  SQF_TEAMINFO_NUMBER|SQF_TEAMINFO_NAME|SQF_TEAMINFO_COLOR|SQF_TEAMINFO_SCORE);
     ds << quint32(QDateTime::currentMSecsSinceEpoch());
     EncodePacket(p);
 
@@ -489,6 +497,37 @@ static QString GetStringFromStream(QDataStream& ds)
     }
 
     return QString::fromUtf8(a);
+}
+
+static QString CleanPlayerName(QString pp_name)
+{
+    QString out = "";
+
+    bool inEscape = false;
+    bool inSeq = false;
+    for (int i = 0; i < pp_name.size(); i++)
+    {
+        // \034 is the \c thing
+        if (!inEscape && (pp_name[i] == '\034'))
+            inEscape = true;
+        else if (inEscape)
+        {
+            if (inSeq)
+            {
+                if (pp_name[i] == ']')
+                {
+                    inEscape = false;
+                    inSeq = false;
+                }
+            }
+            else if (pp_name[i] == '[')
+                inSeq = true;
+            else inEscape = false;
+        }
+        else out += pp_name[i];
+    }
+
+    return out;
 }
 
 void ServerUpdater::parseDatagram(QDataStream& ds, QHostAddress host, quint16 port, qint64 timestamp)
@@ -651,6 +690,9 @@ void ServerUpdater::parseDatagram(QDataStream& ds, QHostAddress host, quint16 po
 
             if (finished)
             {
+                // check for relevant setting
+                if (!Settings::get()->value("refreshing.keepOldData", true).toBool())
+                    OldServers.clear();
                 State = State_WaitingServers;
                 MasterIP = 0;
                 MasterPort = 0;
@@ -779,6 +821,15 @@ void ServerUpdater::parseDatagram(QDataStream& ds, QHostAddress host, quint16 po
             srv->MaxPlayers = p_maxplayers;
         }
 
+        if (flags & SQF_PWADS)
+        {
+            srv->PWADs.clear();
+            quint8 p_numpwads;
+            ds >> p_numpwads;
+            for (quint8 i = 0; i < p_numpwads; i++)
+                srv->PWADs.append(GetStringFromStream(ds));
+        }
+
         if (flags & SQF_GAMETYPE)
         {
             quint8 p_gametype;
@@ -833,6 +884,29 @@ void ServerUpdater::parseDatagram(QDataStream& ds, QHostAddress host, quint16 po
             srv->ForceJoinPassword = !!p_forcejoinpassword;
         }
 
+        if (flags & SQF_LIMITS)
+        {
+            qint16 p_fraglimit;
+            qint16 p_timelimit;
+            qint16 p_timeleft = 0;
+            qint16 p_duellimit;
+            qint16 p_pointlimit;
+            qint16 p_winlimit;
+            ds >> p_fraglimit;
+            ds >> p_timelimit;
+            if (p_timelimit > 0)
+                ds >> p_timeleft;
+            ds >> p_duellimit;
+            ds >> p_pointlimit;
+            ds >> p_winlimit;
+            srv->FragLimit = p_fraglimit;
+            srv->TimeLimit = p_timelimit;
+            srv->TimeLeft = p_timeleft;
+            srv->DuelLimit = p_duellimit;
+            srv->PointLimit = p_pointlimit;
+            srv->WinLimit = p_winlimit;
+        }
+
         if (flags & SQF_NUMPLAYERS)
         {
             quint8 p_numplayers;
@@ -842,6 +916,8 @@ void ServerUpdater::parseDatagram(QDataStream& ds, QHostAddress host, quint16 po
 
         if (flags & SQF_PLAYERDATA)
         {
+            srv->SpectatorCount = 0;
+            srv->BotCount = 0;
             for (int i = 0; i < srv->PlayerCount; i++)
             {
                 QString pp_name = GetStringFromStream(ds);
@@ -852,31 +928,7 @@ void ServerUpdater::parseDatagram(QDataStream& ds, QHostAddress host, quint16 po
                 ds >> pp_spectator >> pp_bot;
                 Player p;
                 p.Name = pp_name;
-                p.NameClean = "";
-
-                bool inEscape = false;
-                bool inSeq = false;
-                for (int i = 0; i < pp_name.size(); i++)
-                {
-                    // \034 is the \c thing
-                    if (!inEscape && (pp_name[i] == '\034'))
-                        inEscape = true;
-                    else if (inEscape)
-                    {
-                        if (inSeq)
-                        {
-                            if (pp_name[i] == ']')
-                            {
-                                inEscape = false;
-                                inSeq = false;
-                            }
-                        }
-                        else if (pp_name[i] == '[')
-                            inSeq = true;
-                        else inEscape = false;
-                    }
-                    else p.NameClean += pp_name[i];
-                }
+                p.NameClean = CleanPlayerName(p.Name);
 
                 //qDebug("player = %s", p.NameClean.toUtf8().data());
 
@@ -912,6 +964,50 @@ void ServerUpdater::parseDatagram(QDataStream& ds, QHostAddress host, quint16 po
             }
         }
 
+        if (flags & SQF_TEAMINFO_NUMBER)
+        {
+            quint8 p_numteams;
+            ds >> p_numteams;
+            srv->Teams.resize(p_numteams);
+
+            if (flags & SQF_TEAMINFO_NAME)
+            {
+                for (quint8 i = 0; i < p_numteams; i++)
+                {
+                    srv->Teams[i].Name = GetStringFromStream(ds);
+                    srv->Teams[i].NameClean = CleanPlayerName(srv->Teams[i].Name);
+                }
+            }
+
+            if (flags & SQF_TEAMINFO_COLOR)
+            {
+                for (quint8 i = 0; i < p_numteams; i++)
+                {
+                    quint32 p_teamcolor;
+                    ds >> p_teamcolor;
+                    srv->Teams[i].Color = QColor((p_teamcolor & 0xFF0000) >> 16, (p_teamcolor & 0x00FF00) >> 8, (p_teamcolor & 0x0000FF));
+                }
+            }
+
+            if (flags & SQF_TEAMINFO_SCORE)
+            {
+                for (quint8 i = 0; i < p_numteams; i++)
+                {
+                    qint16 p_teampoints;
+                    ds >> p_teampoints;
+                    srv->Teams[i].Points = p_teampoints;
+                }
+            }
+        }
+        else if (flags & (SQF_TEAMINFO_NAME|SQF_TEAMINFO_COLOR|SQF_TEAMINFO_SCORE))
+        {
+            qDebug("ServerUpdater: %s: Received SQF_TEAMINFO_NAME, SQF_TEAMINFO_COLOR or SQF_TEAMINFO_SCORE, but no SQF_TEAMINFO_NUMBER.", srv->IPString.toUtf8().data());
+            srv->reset();
+            srv->Title = "<< BAD PACKET DATA >>";
+            srv->LastState = Server::State_BadPacket;
+            return;
+        }
+
         if (flags & SQF_ALL_DMFLAGS)
         {
             quint8 p_dmflaglen;
@@ -919,8 +1015,10 @@ void ServerUpdater::parseDatagram(QDataStream& ds, QHostAddress host, quint16 po
             if (p_dmflaglen != 5)
             {
                 qDebug("ServerUpdater: %s: Unknown count of DMFlags (%d).", srv->IPString.toUtf8().data(), p_dmflaglen);
-                //srv->LastState = Server::State_BadPacket;
-                //return;
+                srv->reset();
+                srv->Title = "<< BAD PACKET DATA >>";
+                srv->LastState = Server::State_BadPacket;
+                return;
             }
 
             ds >> srv->DMFlags;

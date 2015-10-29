@@ -2,6 +2,7 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
+#include <QListWidgetItem>
 #include "serverlist.h"
 #include "serverupdater.h"
 
@@ -32,6 +33,8 @@ private slots:
     void sUpdateStarted();
     void sUpdateRequested(quint32 ip, quint16 port);
 
+    void on_optionsTree_currentItemChanged(QListWidgetItem *current, QListWidgetItem *previous);
+
     void on_optionsAppearance_pingBad_valueChanged(int arg1);
     void on_optionsAppearance_pingGood_valueChanged(int arg1);
     void on_optionsAppearance_classicView_toggled(bool checked);
@@ -43,6 +46,11 @@ private slots:
     void on_optionsAppearance_animateRefresh_toggled(bool checked);
     void on_optionsAppearance_smoothPing_toggled(bool checked);
 
+    void on_optionsRefreshing_useMaster_toggled(bool checked);
+    void on_optionsRefreshing_masterAddress_textEdited(const QString &arg1);
+    void on_optionsRefreshing_timeout_valueChanged(int arg1);
+    void on_optionsRefreshing_keepOldData_toggled(bool checked);
+
 private:
     Ui::MainWindow *ui;
     ServerUpdater* svupdater;
@@ -50,6 +58,8 @@ private:
     static float DPIScale;
 
     void initOptionsTab();
+
+    void closeEvent(QCloseEvent *);
 };
 
 #endif // MAINWINDOW_H

@@ -48,7 +48,7 @@ public:
     void scheduleUpdateAll(quint32 ip, quint16 port);
     bool scheduleUpdateServer(QString serverAddress);
     void scheduleUpdateServer(quint32 ip, quint16 port);
-    void scheduleUpdateVisible();
+    void scheduleUpdateVisible(bool all);
     void abortUpdates();
 
     bool isActive() { return (State != State_Inactive); }

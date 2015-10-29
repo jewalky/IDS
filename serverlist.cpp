@@ -23,6 +23,7 @@
 
 #include "mainwindow.h"
 #include "settings.h"
+#include "playerspopup.h"
 
 ServerList* ServerList::serverComparatorContext = 0;
 
@@ -45,7 +46,7 @@ ServerList::ServerList(QWidget* parent) :
     //setFlag(Flag_CVPlayersTop, true);
     //setFlag(Flag_AnimateRefresh, true);
 
-    HoveredServer = ClickedServer = SelectedServer = -1;
+    HoveredServerColumn = HoveredServer = ClickedServer = SelectedServer = -1;
     HoveredCategory = ClickedCategory = -1;
     HoveredHeader = ClickedHeader = -1;
 
@@ -362,8 +363,21 @@ void ServerList::updateWidget()
     }
     else
     {
+        for (int j = 0; j < ServerCatCount; j++)
+            CategoriesServers[j] = 0;
         for (int i = 0; i < Servers.size(); i++)
         {
+            for (int j = 1; j < ServerCatCount; j++)
+            {
+                if ((!Filters[j].checkFlag(ServerFilter::Flag_HasFilter) ||
+                     Filters[j].getFilter().checkServer(Servers[i])) &&
+                    (!Filters[j].checkFlag(ServerFilter::Flag_HasExceptions) ||
+                     !Filters[j].getExceptions().checkServer(Servers[i]))) // here be the filter check
+                {
+                    CategoriesServers[j]++; // still count servers in categories
+                }
+            }
+
             if ((Filters[0].checkFlag(ServerFilter::Flag_HasFilter) &&
                  !Filters[0].getFilter().checkServer(Servers[i])) ||
                 (Filters[0].checkFlag(ServerFilter::Flag_HasExceptions) &&
@@ -849,6 +863,23 @@ void ServerList::paintEvent(QPaintEvent *e)
                             p.setPen(textColor);
                             p.drawText(srvcc_rect, srv.IWAD.toLower(), to);
                         }
+                        else if (k == ServerList_PWADs)
+                        {
+                            QTextOption to;
+                            to.setWrapMode(QTextOption::NoWrap);
+                            to.setAlignment(Qt::AlignVCenter);
+                            p.setPen(textColor);
+                            QStringList pwads_list;
+                            for (int l = 0; l < srv.PWADs.size(); l++)
+                            {
+                                if (srv.PWADs[l].toLower().contains("skulltag_data") ||
+                                    srv.PWADs[l].toLower().contains("skulltag_actors"))
+                                        continue;
+                                pwads_list.append(srv.PWADs[l]);
+                            }
+                            QString pwads_str = pwads_list.join(", ");
+                            p.drawText(srvcc_rect, pwads_str, to);
+                        }
                         else if (k == ServerList_Map)
                         {
                             QTextOption to;
@@ -1092,6 +1123,7 @@ void ServerList::mouseReleaseEvent(QMouseEvent *e)
         if (HoveredCategory == ClickedCategory)
         {
             Filters[ClickedCategory].setEnabled(!Filters[ClickedCategory].isEnabled());
+            saveFilterList();
             updateWidget();
         }
     }
@@ -1127,6 +1159,7 @@ void ServerList::mouseReleaseEvent(QMouseEvent *e)
 void ServerList::mouseMoveEvent(QMouseEvent *e)
 {
     int OldHoveredCategory = HoveredCategory;
+    int OldHoveredServerColumn = HoveredServerColumn;
     int OldHoveredServer = HoveredServer;
     int OldHoveredHeader = HoveredHeader;
 
@@ -1143,7 +1176,6 @@ void ServerList::mouseMoveEvent(QMouseEvent *e)
     {
         // draw the header
         int wdc = ColumnWidths[i];
-        QString title = getColumnName(i);
 
         QRect rect_headercur = rect_header;
         rect_headercur.setLeft(rect_headercur.left()+wdoffs);
@@ -1153,6 +1185,7 @@ void ServerList::mouseMoveEvent(QMouseEvent *e)
         {
             HoveredCategory = -1;
             HoveredServer = -1;
+            HoveredServerColumn = -1;
             HoveredHeader = i;
             inHeader = true;
             break;
@@ -1172,12 +1205,32 @@ void ServerList::mouseMoveEvent(QMouseEvent *e)
         }
 
         HoveredServer = -1;
+        HoveredServerColumn = -1;
         for (int i = 0; i < ServersVisual.size(); i++)
         {
             QRect svrec = ServersVisual[i].Rect;
             svrec.setBottom(svrec.bottom()+1);
             if (svrec.contains(e->pos()))
+            {
                 HoveredServer = i;
+                wdoffs = 0;
+                for (int j = 0; j < ServerList_WIDTH; j++)
+                {
+                    int wdc = ColumnWidths[j];
+
+                    QRect rect_headercur = svrec;
+                    rect_headercur.setLeft(rect_headercur.left()+wdoffs);
+                    rect_headercur.setRight(rect_headercur.left()+wdc);
+
+                    if (rect_headercur.contains(e->pos()))
+                    {
+                        HoveredServerColumn = j;
+                        break;
+                    }
+
+                    wdoffs += wdc;
+                }
+            }
         }
     }
 
@@ -1192,6 +1245,25 @@ void ServerList::mouseMoveEvent(QMouseEvent *e)
     }
     else if (OldHoveredHeader != HoveredHeader)
         update();
+
+    if (OldHoveredServer != HoveredServer ||
+            OldHoveredServerColumn != HoveredServerColumn)
+    {
+        //
+        if (OldHoveredServerColumn == ServerList_Players &&
+                HoveredServerColumn != ServerList_Players)
+        {
+            PlayersPopup::hideStatic();
+        }
+
+        if (HoveredServer >= 0 && HoveredServerColumn >= 0)
+        {
+            if (HoveredServerColumn == ServerList_Players)
+            {
+                PlayersPopup::showFromServer(*ServersVisual[HoveredServer].Server, e->globalX()+4, e->globalY()-4);
+            }
+        }
+    }
 }
 
 void ServerList::enterEvent(QEvent *)
@@ -1207,6 +1279,9 @@ void ServerList::leaveEvent(QEvent *)
     {
         HoveredCategory = -1;
         HoveredServer = -1;
+        if (HoveredServerColumn == ServerList_Players)
+            PlayersPopup::hideStatic();
+        HoveredServerColumn = -1;
         HoveredHeader = -1;
         update();
     }
@@ -1441,4 +1516,20 @@ void ServerList::scrollToServer(int server)
     }
 
     update();
+}
+
+void ServerList::saveFilterList()
+{
+    // also save filters
+    const QVector<ServerFilter>& v = getFilterList();
+    QVariantList vl;
+    for (int i = 0; i < v.size(); i++)
+    {
+        const ServerFilter& vf = v[i];
+        QMap<QString, QVariant> vlf = vf.asMap();
+        vl.append(QVariant(vlf));
+    }
+
+    Settings::get()->setValue("filters.configured", true);
+    Settings::get()->setValue("filters.list", vl);
 }

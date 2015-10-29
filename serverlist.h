@@ -295,6 +295,13 @@ struct Server
     bool ForcePassword;
     bool ForceJoinPassword;
 
+    int FragLimit;
+    int TimeLimit;
+    int TimeLeft;
+    int DuelLimit;
+    int PointLimit;
+    int WinLimit;
+
     QVector<Player> Players;
     QVector<Team> Teams;
 
@@ -315,9 +322,14 @@ struct Server
 
     Server()
     {
-        Ping = 0;
         IP = 0;
         Port = 0;
+        reset();
+    }
+
+    void reset()
+    {
+        Ping = 0;
         GameMode = 0;
         IsInstagib = false;
         IsBuckshot = false;
@@ -333,9 +345,22 @@ struct Server
         ZACompatFlags = 0;
         ForcePassword = false;
         ForceJoinPassword = false;
+        FragLimit = 0;
+        TimeLimit = 0;
+        TimeLeft = 0;
+        DuelLimit = 0;
+        PointLimit = 0;
+        WinLimit = 0;
         LastState = State_Refreshing;
         Visible = false;
         CategoryCount = 0;
+        GameModeString.clear();
+        Title.clear();
+        Map.clear();
+        IWAD.clear();
+        PWADs.clear();
+        Players.clear();
+        Teams.clear();
     }
 
     bool isNA() const
@@ -347,6 +372,34 @@ struct Server
                 return true;
         return false;*/
         return GameModeString.isEmpty();
+    }
+
+    QString getPointsName() const
+    {
+        switch (GameMode)
+        {
+        case GAMEMODE_COOPERATIVE:
+        case GAMEMODE_SURVIVAL:
+        case GAMEMODE_INVASION:
+            return "Kills";
+        default:
+        case GAMEMODE_DEATHMATCH:
+        case GAMEMODE_TEAMPLAY:
+        case GAMEMODE_DUEL:
+        case GAMEMODE_TERMINATOR:
+            return "Frags";
+        case GAMEMODE_LASTMANSTANDING:
+        case GAMEMODE_TEAMLMS:
+            return "Wins";
+        case GAMEMODE_POSSESSION:
+        case GAMEMODE_TEAMPOSSESSION:
+        case GAMEMODE_TEAMGAME:
+        case GAMEMODE_CTF:
+        case GAMEMODE_ONEFLAGCTF:
+        case GAMEMODE_SKULLTAG:
+        case GAMEMODE_DOMINATION:
+            return "Points";
+        }
     }
 
 private:
@@ -505,6 +558,8 @@ public:
         return Filters;
     }
 
+    void saveFilterList();
+
     int getServerCount(int cat)
     {
         if ((cat >= 0) && (cat < ServerCatCount))
@@ -564,6 +619,7 @@ protected:
     QVector<QRect> CategoriesRects;//[ServerCat_COUNT];
     QVector<ServerFilter> Filters;
 
+    int HoveredServerColumn;
     int HoveredServer;
     int ClickedServer;
     int SelectedServer;

@@ -23,7 +23,8 @@ SOURCES += main.cpp\
     settings.cpp \
     filtersettingswindow.cpp \
     filtersettingsmaster.cpp \
-    filterlist.cpp
+    filterlist.cpp \
+    playerspopup.cpp
 
 HEADERS  += mainwindow.h \
     fancyprogressbar.h \
@@ -34,12 +35,14 @@ HEADERS  += mainwindow.h \
     settings.h \
     filtersettingswindow.h \
     filtersettingsmaster.h \
-    filterlist.h
+    filterlist.h \
+    playerspopup.h
 
 FORMS    += mainwindow.ui \
     filtersettingswindow.ui \
     filtersettingsmaster.ui \
-    filterlist.ui
+    filterlist.ui \
+    playerspopup.ui
 
 RESOURCES += \
     resources.qrc
