@@ -6,6 +6,8 @@
 
 #ifdef WIN32
 #include <winsock2.h>
+#undef min
+#undef max
 #endif
 
 ServerUpdater::ServerUpdater(QObject *parent, ServerList *servers, quint16 localPort) :
